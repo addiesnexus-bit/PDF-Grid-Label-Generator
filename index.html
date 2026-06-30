@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>A4 Grid PDF Automation</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <style>
+        .page-preview {
+            width: 210mm;
+            height: 297mm;
+            background: white;
+            margin: 20px auto;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+            display: grid;
+            grid-template-columns: repeat(2, 100mm);
+            grid-template-rows: repeat(8, 35.875mm);
+            padding: 5mm;
+            box-sizing: border-box;
+            overflow: hidden;
+        }
+        .box-preview {
+            border: 1px dashed #ccc;
+            padding-top: 3mm;
+            padding-left: 2mm;
+            padding-right: 2mm;
+            font-size: 10pt;
+            overflow: hidden;
+            line-height: 1.2;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen p-4 md:p-8">
+    <div class="max-w-5xl mx-auto bg-white rounded-xl shadow-lg p-6">
+        <h1 class="text-2xl font-bold text-gray-800 mb-6 border-b pb-2">PDF Grid Layout Automation</h1>
+        
+        <!-- Workflow Steps -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-8 mb-8">
+            <!-- Left: File Uploads -->
+            <div class="space-y-6">
+                <section>
+                    <label class="block text-sm font-semibold text-gray-700 mb-2">1. Upload Excel Data</label>
+                    <input type="file" id="excelUpload" accept=".xlsx, .xls" 
+                        class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100">
+                </section>
+
+                <section id="mappingSection" class="hidden">
+                    <label class="block text-sm font-semibold text-gray-700 mb-2">2. Map Columns</label>
+                    <div class="space-y-3 p-4 bg-gray-50 rounded-lg">
+                        <div>
+                            <span class="text-xs text-gray-500 uppercase font-bold">Firm Name</span>
+                            <select id="colFirm" class="w-full mt-1 border rounded px-2 py-1"></select>
+                        </div>
+                        <div>
+                            <span class="text-xs text-gray-500 uppercase font-bold">Address</span>
+                            <select id="colAddress" class="w-full mt-1 border rounded px-2 py-1"></select>
+                        </div>
+                        <div>
+                            <span class="text-xs text-gray-500 uppercase font-bold">Phone Number</span>
+                            <select id="colPhone" class="w-full mt-1 border rounded px-2 py-1"></select>
+                        </div>
+                    </div>
+                </section>
+            </div>
+
+            <!-- Right: Grid Logic Summary -->
+            <div class="bg-blue-50 p-5 rounded-xl border border-blue-100">
+                <h2 class="font-bold text-blue-800 mb-2">Locked Grid Logic</h2>
+                <ul class="text-sm text-blue-700 space-y-2">
+                    <li><strong>Page Size:</strong> A4 (210mm x 297mm)</li>
+                    <li><strong>Margins:</strong> 5mm All Sides</li>
+                    <li><strong>Grid:</strong> 2 Columns × 8 Rows (16 per page)</li>
+                    <li><strong>Box Size:</strong> 100mm × 35.875mm</li>
+                    <li><strong>Internal Padding:</strong> 3mm Top</li>
+                </ul>
+                <button id="generateBtn" disabled class="mt-6 w-full bg-blue-600 text-white font-bold py-3 rounded-lg opacity-50 cursor-not-allowed hover:bg-blue-700 transition-all">
+                    Generate & Download PDF
+                </button>
+            </div>
+        </div>
+
+        <!-- Preview Area -->
+        <div id="previewContainer" class="mt-8 border-t pt-8">
+            <h2 class="text-lg font-bold text-gray-700 mb-4">Live Preview (First Page)</h2>
+            <div id="pdfPreview" class="page-preview mx-auto">
+                <!-- Boxes will be injected here -->
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const { jsPDF } = window.jspdf;
+        let excelData = [];
+        let columns = [];
+
+        // UI Selectors
+        const excelUpload = document.getElementById('excelUpload');
+        const mappingSection = document.getElementById('mappingSection');
+        const colFirm = document.getElementById('colFirm');
+        const colAddress = document.getElementById('colAddress');
+        const colPhone = document.getElementById('colPhone');
+        const generateBtn = document.getElementById('generateBtn');
+        const pdfPreview = document.getElementById('pdfPreview');
+
+        // Handle Excel Upload
+        excelUpload.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            // Fix: Check if file exists before reading to avoid TypeError
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = (evt) => {
+                const data = evt.target.result;
+                const workbook = XLSX.read(data, { type: 'binary' });
+                const firstSheet = workbook.SheetNames[0];
+                excelData = XLSX.utils.sheet_to_json(workbook.Sheets[firstSheet]);
+                
+                if (excelData.length > 0) {
+                    columns = Object.keys(excelData[0]);
+                    populateSelectors();
+                    mappingSection.classList.remove('hidden');
+                    generateBtn.disabled = false;
+                    generateBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+                    updatePreview();
+                }
+            };
+            reader.readAsBinaryString(file);
+        });
+
+        function populateSelectors() {
+            [colFirm, colAddress, colPhone].forEach(select => {
+                select.innerHTML = columns.map(col => `<option value="${col}">${col}</option>`).join('');
+            });
+            // Defaults
+            if (columns[0]) colFirm.value = columns[0];
+            if (columns[1]) colAddress.value = columns[1];
+            if (columns[2]) colPhone.value = columns[2];
+        }
+
+        [colFirm, colAddress, colPhone].forEach(s => s.addEventListener('change', updatePreview));
+
+        function updatePreview() {
+            pdfPreview.innerHTML = '';
+            // Only show first 16 for preview
+            const previewSet = excelData.slice(0, 16);
+            
+            previewSet.forEach(row => {
+                const div = document.createElement('div');
+                div.className = 'box-preview';
+                div.innerHTML = `
+                    <div class="text-xs text-gray-400">To,</div>
+                    <div class="font-bold">${row[colFirm.value] || ''}</div>
+                    <div class="text-xs">${row[colAddress.value] || ''}</div>
+                    <div class="text-xs">${row[colPhone.value] || ''}</div>
+                `;
+                pdfPreview.appendChild(div);
+            });
+
+            // Fill empty boxes if less than 16
+            for (let i = previewSet.length; i < 16; i++) {
+                const empty = document.createElement('div');
+                empty.className = 'box-preview bg-gray-50';
+                pdfPreview.appendChild(empty);
+            }
+        }
+
+        generateBtn.addEventListener('click', async () => {
+            const doc = new jsPDF({
+                orientation: 'portrait',
+                unit: 'mm',
+                format: 'a4'
+            });
+
+            // Constants based on Grid Definition
+            const margin = 5;
+            const cols = 2;
+            const rows = 8;
+            const boxWidth = 100;
+            const boxHeight = 35.875;
+            const paddingInternalTop = 3;
+            
+            let currentRecord = 0;
+            const totalRecords = excelData.length;
+
+            while (currentRecord < totalRecords) {
+                if (currentRecord > 0) doc.addPage();
+
+                for (let r = 0; r < rows; r++) {
+                    for (let c = 0; c < cols; c++) {
+                        if (currentRecord >= totalRecords) break;
+
+                        const x = margin + (c * boxWidth);
+                        const y = margin + (r * boxHeight);
+                        const data = excelData[currentRecord];
+
+                        // Draw Content
+                        doc.setFontSize(10);
+                        doc.setFont("helvetica", "normal");
+                        
+                        let cursorY = y + paddingInternalTop + 4; 
+                        
+                        doc.text("To,", x + 2, cursorY);
+                        cursorY += 5;
+                        
+                        doc.setFont("helvetica", "bold");
+                        const firmName = String(data[colFirm.value] || "");
+                        doc.text(firmName, x + 2, cursorY, { maxWidth: boxWidth - 4 });
+                        cursorY += 5;
+
+                        doc.setFont("helvetica", "normal");
+                        doc.setFontSize(9);
+                        const address = String(data[colAddress.value] || "");
+                        const addrLines = doc.splitTextToSize(address, boxWidth - 4);
+                        doc.text(addrLines, x + 2, cursorY);
+                        
+                        cursorY += (addrLines.length * 4.5);
+                        
+                        const phone = String(data[colPhone.value] || "");
+                        doc.text(phone, x + 2, cursorY);
+
+                        currentRecord++;
+                    }
+                }
+            }
+
+            doc.save('Automated_Grid_Labels.pdf');
+        });
+    </script>
+</body>
+</html>
